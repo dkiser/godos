@@ -20,112 +20,78 @@
 
 package engine
 
-import (
-	"fmt"
-	"time"
+import "time"
 
-	"github.com/pborman/uuid"
-)
-
-// All engines have the following
+// Engine provides a construct around launching an attack
+// function every LoopTicker time for a total of RunTicker time
 type Engine struct {
-	// total run time in seconds
-	runTime int
+	// total run ticker
+	RunTicker *time.Ticker
+	// attak loop ticker
+	LoopTicker *time.Ticker
 	// total go routines to use
-	concurrency int
-	// time between attackFunc loops
-	attackLoopTime int
+	Concurrency int
 	// user attack func to call
-	attackFunc func()
-	// channel used for quitting
-	quitChannel chan bool
-	// channel used for done complete
-	doneChannel chan bool
+	AttackFunc func()
+	// time when engine started
+	TimeStart time.Time
+	// time when engine stopped
+	TimeStop time.Time
+	// duration of engine run
+	TimeDuration time.Duration
 }
 
 // NewEngine allocates a an Engine type for wrapping attack runs provided by caller
-func NewEngine(runtime int, concurrency int, attackLoopTime int, attackFunc func()) (*Engine, error) {
+func NewEngine(runtime time.Duration, loopTime time.Duration, concurrency int, attackFunc func()) (*Engine, error) {
 	e := &Engine{
-		runTime:        runtime,
-		concurrency:    concurrency,
-		attackLoopTime: attackLoopTime,
-		attackFunc:     attackFunc,
-		quitChannel:    make(chan bool),
-		doneChannel:    make(chan bool),
+		RunTicker:   time.NewTicker(runtime),
+		LoopTicker:  time.NewTicker(loopTime),
+		Concurrency: concurrency,
+		AttackFunc:  attackFunc,
 	}
+	// Only log the warning severity or above.
 	return e, nil
 }
 
-// Start launches concurrency/timers for calling attack function
-func (e *Engine) Start() {
-	fmt.Println("starting engine")
-
-	defer e.close()
-
+//
+func (e *Engine) goAttack() {
+	//id := uuid.NewRandom()
 	// launch attack runners
-	for i := 0; i < e.concurrency; i++ {
-		go e.attackRunner()
+	for i := 0; i < e.Concurrency; i++ {
+		//fmt.Println("starting attacker #", id)
+		go e.AttackFunc()
 	}
-
-	// wait and drain attackers
-	e.timeAndDrain()
 }
 
-// attack goroutine
-func (e *Engine) attackRunner() {
+// Start runs the attack function loop
+func (e *Engine) Start() {
+	e.TimeStart = time.Now()
+	// launch first iteration
+	e.goAttack()
 
-	id := uuid.NewRandom()
-	tickerLoop := time.NewTicker(time.Second * time.Duration(e.attackLoopTime))
+	// main attack func loop
 	for {
-		// select case to see if we should quit
 		select {
-		case <-e.quitChannel:
-			// we are done, exit loop and goroutine
-			fmt.Println("exiting attacker #", id)
-			e.doneChannel <- true
-			break
-		default:
-			// launch registered attack function
-			fmt.Println("starting attacker #", id)
-			e.attackFunc()
-			<-tickerLoop.C
+		case <-e.RunTicker.C:
+			//fmt.Println("Timer expired")
+			e.Stop()
+			return
+		case <-e.LoopTicker.C:
+			//fmt.Println("Ticker ticked")
+			// launch attack runners
+			e.goAttack()
 		}
 	}
-
 }
 
-// general close method
-func (e *Engine) close() {
-	close(e.doneChannel)
-	close(e.quitChannel)
+// Close will free up resources of the Engine
+func (e *Engine) Close() {
+	e.RunTicker.Stop()
+	e.LoopTicker.Stop()
 }
 
-// Stop will trigger all goroutines to stop after they are
-// done with their respective execution loops
+// Stop will trigger launch of attack funcs to stop
 func (e *Engine) Stop() {
-	// drain the go routines launched
-	for i := 0; i < e.concurrency; i++ {
-		select {
-		case e.quitChannel <- true:
-		default:
-		}
-
-		fmt.Println("draining goroutine #", i)
-	}
-
-	// wait for all GOs to die
-	for i := 0; i < e.concurrency; i++ {
-		<-e.doneChannel
-	}
-}
-
-func (e *Engine) timeAndDrain() {
-	// setup ticker to wait for time desired
-	fmt.Println("Setting up timer for ", e.runTime, " seconds.")
-	ticker := time.NewTicker(time.Second * time.Duration(e.runTime))
-
-	// wait for timer to expire
-	<-ticker.C
-
-	e.Stop()
+	e.TimeStop = time.Now()
+	e.TimeDuration = e.TimeStop.Sub(e.TimeStart)
 }

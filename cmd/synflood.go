@@ -22,6 +22,7 @@ package cmd
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/dkiser/godos/engine"
 	"github.com/spf13/cobra"
@@ -30,6 +31,7 @@ import (
 // synfloodCmd vars
 var dstIP string
 var srcPort, dstPort, concurrency, runtime, pps int
+var counter int
 
 // synfloodCmd helper vars
 var goQuitChannel, drainDoneChannel chan bool
@@ -63,11 +65,19 @@ func init() {
 }
 
 func attack() {
-	fmt.Println("running synflood attack")
+	counter++
 }
 
 // run the attack
 func run() {
-	e, _ := engine.NewEngine(runtime, concurrency, 10, attack)
+	// run engine with attack function and time calculated for PPS
+	runTime := time.Second * time.Duration(runtime)
+	loopTime := time.Duration(int64(time.Second) / int64(pps))
+	e, _ := engine.NewEngine(runTime, loopTime, concurrency, attack)
+	defer e.Close()
+
 	e.Start()
+	fmt.Println("time elapsed: ", e.TimeDuration)
+	fmt.Println("packets sent: ", counter)
+	fmt.Println("pps: ", counter/int(e.TimeDuration/time.Second))
 }
